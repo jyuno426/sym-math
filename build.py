@@ -1,0 +1,105 @@
+# -*- coding: utf-8 -*-
+
+from datetime import date
+from utility import *
+from core import *
+import time
+import sys
+import os
+
+
+def build(data_type, dataset_path, n=int(2e4)):
+    start_time = time.time()
+    slack_message("Start " + data_type + " dataset generation: n=" + str(n), data_type)
+
+    input_file = dataset_path + "/" + data_type + ".in"
+    output_file = dataset_path + "/" + data_type + ".out"
+
+    duplicate_check = set()
+
+    try:
+        in_file = open(input_file, "r")
+        out_file = open(output_file, "r")
+        in_lines = list(in_file.readlines())
+        out_lines = list(out_file.readlines())
+        i = len(in_lines)
+        j = len(out_lines)
+        if i == j:
+            for k in range(i):
+                duplicate_check.add(in_lines[k].strip() + "-" + out_lines[k].strip())
+        in_file.close()
+        out_file.close()
+    except:
+        i = 0
+        j = 0
+
+    assert i == j
+
+    slack_message("current_cnt: " + str(i), data_type)
+
+    if n < i:
+        n = i
+
+    while i < n:
+        input_string, output_string = generate_data(data_type)
+
+        input_string = input_string.replace("f,x", "f").replace("g,x", "g")
+        output_string = output_string.replace("f,x", "f").replace("g,x", "g")
+
+        if input_string + "-" + output_string in duplicate_check:
+            continue
+        else:
+            duplicate_check.add(input_string + "-" + output_string)
+
+        in_file = open(input_file, "a+")
+        out_file = open(output_file, "a+")
+        in_file.write(input_string + "\n")
+        out_file.write(output_string + "\n")
+        in_file.close()
+        out_file.close()
+
+        i += 1
+
+        message = print_progress_bar(
+            iteration=i,
+            total=n,
+            prefix=data_type + " data generation-" + str(i) + "/" + str(n) + ":",
+            start_time=start_time,
+            current_time=time.time(),
+            length=20,
+        )
+
+        if i % 1000 == 0:
+            slack_message(message, data_type)
+
+    slack_message(data_type + " finished", data_type)
+
+
+if __name__ == "__main__":
+    today = date.today().strftime("%Y-%m-%d")
+    dataset_path = "./dataset/" + today
+    data_type = "integration"
+    data_cnt = int(2e4)
+
+    if not os.path.exists("./dataset/"):
+        os.makedirs("./dataset/")
+    if not os.path.exists(dataset_path):
+        os.makedirs(dataset_path)
+
+    l = len(sys.argv)
+
+    assert 1 <= l <= 3
+
+    try:
+        data_type = sys.argv[1]
+    except:
+        pass
+    assert data_type in ["integration", "ode1", "ode2"]
+
+    try:
+        data_cnt = int(sys.argv[2])
+    except:
+        pass
+    assert data_cnt >= 0
+
+    build(n=data_cnt, data_type=data_type, dataset_path=dataset_path)
