@@ -25,20 +25,47 @@ __all__ = [
     "_asinh",
     "_acosh",
     "_atanh",
+    "test_equal",
     "test_real",
     "test_valid",
     "drop_number",
     "subs_derivative",
     "reduce_coefficient",
     "reduce_expr",
-    "solve_expr",
+    "solve_expr_1",
 ]
+
+inverse_mapping = {
+    exp: log,
+    log: exp,
+    sin: asin,
+    cos: acos,
+    tan: atan,
+    asin: sin,
+    acos: cos,
+    atan: tan,
+    sinh: asinh,
+    cosh: acosh,
+    tanh: atanh,
+    asinh: sinh,
+    acosh: cosh,
+    atanh: tanh,
+}
+
+
+def test_equal(expr):
+    return simplify(expr) == 0
 
 
 def test_valid(expr):
-    return not any(
-        s in str(expr) for s in ["oo", "I", "Dummy", "nan", "zoo", "conjugate"]
-    )
+    try:
+        return not any(
+            s in str(expr) for s in ["oo", "I", "Dummy", "nan", "zoo", "conjugate"]
+        )
+    except:
+        # when we call str(expr), sympy calculate expr so that it can occur errors
+        # such as zero division error.
+        return False
 
 
 def test_real(expr, var):
@@ -70,7 +97,56 @@ def subs_derivative(expr, var):
     elif len(expr.args) == 0:
         return expr
     else:
-        return expr.func(*[subs_derivative(arg, var) for arg in expr.args])
+        return expr.func(
+            *[subs_derivative(arg, var) for arg in expr.args], evaluate=False
+        )
+
+
+def solve_expr_1(expr, res, var):
+    assert var in expr.free_symbols
+    assert var not in res.free_symbols
+
+    if expr == var:
+        assert len(expr.args) == 0
+        return res
+    elif expr.func in inverse_mapping:
+        assert len(expr.args) == 1
+        return solve_expr_1(
+            expr.args[0], inverse_mapping[expr.func](res, evaluate=False), var
+        )
+    elif expr.func == sqrt:
+        assert len(expr.args) == 1
+        return solve_expr_1(expr.args[0], _pow(res, 2), var)
+    elif expr.func == Pow:
+        assert len(expr.args) == 2
+        assert "numbers" in str(expr.args[1].func)
+        return solve_expr_1(expr.args[0], _pow(res, _div(1, expr.args[1])), var)
+    elif expr.func == Add:
+        assert len(expr.args) == 2
+        if var in expr.args[0].free_symbols:
+            return solve_expr_1(expr.args[0], _sub(res, expr.args[1]), var)
+        else:
+            return solve_expr_1(expr.args[1], _sub(res, expr.args[0]), var)
+    elif expr.func == Mul:
+        assert len(expr.args) == 2
+        if var in expr.args[0].free_symbols:
+            return solve_expr_1(expr.args[0], _div(res, expr.args[1]), var)
+        else:
+            return solve_expr_1(expr.args[1], _div(res, expr.args[0]), var)
+    else:
+        slack_message(
+            str(expr.func) + "\n" + str(expr) + "\n" + str(res) + "\n" + str(var)
+        )
+        raise Exception(
+            "solve expr 1 error\n"
+            + str(expr.func)
+            + "\n"
+            + str(expr)
+            + "\n"
+            + str(res)
+            + "\n"
+            + str(var)
+        )
 
 
 def reduce_coefficient(expr, coeff, var):
@@ -81,25 +157,22 @@ def reduce_coefficient(expr, coeff, var):
     elif len(expr.args) == 0:
         return expr
     else:
-        return expr.func(*[reduce_coefficient(arg, coeff, var) for arg in expr.args])
+        return expr.func(
+            *[reduce_coefficient(arg, coeff, var) for arg in expr.args], evaluate=False
+        )
 
 
 def reduce_expr(expr, timeout=3, prob=0.3334):
-    if np.random.rand() < prob:
-        try:
-            with time_limit(timeout):
-                return simplify(expr)
-        except TimeoutError:
-            pass
-        except Exception as e:
-            slack_message(str(e))
-            pass
-    return expr
-
-
-def solve_expr(expr, var, timeout=3):
-    with time_limit(timeout):
-        return solve(expr, var)[0]
+    # if np.random.rand() < prob:
+    #     try:
+    #         with time_limit(timeout):
+    #             return simplify(expr)
+    #     except TimeoutError:
+    #         pass
+    #     except Exception as e:
+    #         slack_message(str(e))
+    #         pass
+    return expr.doit()
 
 
 def _add(arg1, arg2):
@@ -132,6 +205,10 @@ def _log(arg):
 
 def _sqrt(arg):
     return sqrt(arg, evaluate=False)
+
+
+def _square(arg):
+    return _pow(arg, 2)
 
 
 def _sin(arg):

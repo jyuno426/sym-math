@@ -3,6 +3,7 @@
 from datetime import date
 from utility import *
 from core import *
+import traceback
 import time
 import sys
 import os
@@ -12,14 +13,14 @@ def build(data_type, dataset_path, n=int(2e4)):
     start_time = time.time()
     slack_message("Start " + data_type + " dataset generation: n=" + str(n), data_type)
 
-    input_file = dataset_path + "/" + data_type + ".in"
-    output_file = dataset_path + "/" + data_type + ".out"
+    in_path = dataset_path + "/" + data_type + ".in"
+    out_path = dataset_path + "/" + data_type + ".out"
 
     duplicate_check = set()
 
     try:
-        in_file = open(input_file, "r")
-        out_file = open(output_file, "r")
+        in_file = open(in_path, "r")
+        out_file = open(out_path, "r")
         in_lines = list(in_file.readlines())
         out_lines = list(out_file.readlines())
         i = len(in_lines)
@@ -41,18 +42,29 @@ def build(data_type, dataset_path, n=int(2e4)):
         n = i
 
     while i < n:
-        input_string, output_string = generate_data(data_type)
+        try:
+            input_string, output_string = generate_data(data_type)
+        except:
+            # handle unknown errors
+            trace = str(traceback.format_exc())
+            print(trace)
+            slack_message("unknown error occurs:\n" + trace)
+            continue
 
         input_string = input_string.replace("f,x", "f").replace("g,x", "g")
         output_string = output_string.replace("f,x", "f").replace("g,x", "g")
 
-        if input_string + "-" + output_string in duplicate_check:
+        if len(input_string.split(",")) > 512:
+            continue
+        elif len(output_string.split(",")) > 512:
+            continue
+        elif input_string + "-" + output_string in duplicate_check:
             continue
         else:
             duplicate_check.add(input_string + "-" + output_string)
 
-        in_file = open(input_file, "a+")
-        out_file = open(output_file, "a+")
+        in_file = open(in_path, "a+")
+        out_file = open(out_path, "a+")
         in_file.write(input_string + "\n")
         out_file.write(output_string + "\n")
         in_file.close()

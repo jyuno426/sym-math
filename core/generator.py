@@ -176,16 +176,25 @@ def generate_random_tree():
     return tree
 
 
-def generate_data(data_type="integration"):
+def generate_data(data_type):
+    _in, _out = _generate_data(data_type)
+    return [expr_to_preorder(_in), expr_to_preorder(_out)]
+
+
+def _generate_data(data_type):
     if data_type == "integration":
         while True:
             tree = generate_random_tree()
             ftn = tree.get_expr()
             if test_real(ftn, x):
-                ftn = reduce_expr(drop_number(tree.get_expr().doit(), [x]))
+                ftn = drop_number(reduce_expr(tree.get_expr()), [x])
+                assert test_valid(ftn)
+
                 deriv = reduce_expr(diff(ftn, x))
-                assert test_valid(ftn) and test_valid(deriv)
-                return [expr_to_preorder(deriv), expr_to_preorder(ftn)]
+                assert test_valid(deriv)
+
+                return [deriv, ftn]
+
     elif data_type == "ode1":
         while True:
             tree = generate_random_tree()
@@ -196,31 +205,26 @@ def generate_data(data_type="integration"):
 
                 ftn = reduce_coefficient(tree.get_expr(init=True), c, x)
                 assert test_valid(ftn)
-                try:
-                    solution = solve_expr(f - ftn, c)
-                except TimeoutError:
-                    # slack_message("solve timeout", data_type)
-                    continue
-                except Exception as e:
-                    slack_message("solve error: " + str(e), data_type)
-                    continue
-                if not test_valid(solution):
+
+                sol = solve_expr_1(_sub(f, ftn), S(0), c)
+                if not test_valid(sol):
                     continue
 
+                # reduce shoulde be done after solve_expr_1
                 ftn = reduce_expr(ftn)
                 if not test_valid(ftn):
                     continue
 
-                diff_eq = reduce_expr(
-                    subs_derivative(fraction(diff(solution.doit(), x))[0], g)
-                )
+                diff_eq = fraction(reduce_expr(subs_derivative(diff(sol, x), g)))[0]
                 if not test_valid(diff_eq):
                     continue
 
-                return [expr_to_preorder(diff_eq), expr_to_preorder(ftn)]
+                return [diff_eq, ftn]
         pass
+
     elif data_type == "ode2":
         pass
+
     else:
         raise Exception("Invalid data_type: " + str(data_type))
 
@@ -228,14 +232,14 @@ def generate_data(data_type="integration"):
 def expr_to_preorder(expr):
     traverse = []
     for arg in preorder_traversal(expr):
-        class_name = str(arg.func)
+        class_name = arg.func.__name__
         res = None
 
         if any(name in class_name for name in c1):
-            traverse.append("Mul")
+            traverse.append(Mul.__name__)
             left, right = str(arg).split("/")
             traverse.append(left)
-            traverse.append("Pow")
+            traverse.append(Pow.__name__)
             traverse.append(right)
             traverse.append("-1")
         elif any(name in class_name for name in c2):
@@ -252,11 +256,37 @@ def expr_to_preorder(expr):
                     check = True
                     break
             if not check:
+                slack_message(
+                    str(arg.func)
+                    + "\n"
+                    + str(arg)
+                    + "\n"
+                    + str(traverse)
+                    + "\n"
+                    + str(expr)
+                )
                 print(arg.func)
                 print(arg)
                 print(traverse)
                 print(expr)
                 raise Exception()
 
-    return ",".join(traverse)
+    res = []
+    for elem in traverse:
+        string = str(elem)
+        if check_number(string):
+            if string[0] == "-":
+                res.append("m")
+                string = string[1:]
+            elif string[0] == "+":
+                res.append("p")
+                string = string[1:]
+            else:
+                res.append("p")
+            for c in string:
+                res.append(c)
+        else:
+            res.append(string)
+
+    return ",".join(res)
 
