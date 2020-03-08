@@ -48,7 +48,7 @@ def test_real(expr, var):
         return False
 
     numeric = 0.123453141592
-    while numeric < 1e10:
+    while numeric < 1e4:
         try:
             value = ftn(numeric)
             if np.isfinite(value) and np.isreal(value):
@@ -84,12 +84,17 @@ def reduce_coefficient(expr, coeff, var):
         return expr.func(*[reduce_coefficient(arg, coeff, var) for arg in expr.args])
 
 
-def reduce_expr(expr, timeout=3):
-    try:
-        with time_limit(timeout):
-            return simplify(expr)
-    except TimeoutError:
-        return expr
+def reduce_expr(expr, timeout=3, prob=0.3334):
+    if np.random.rand() < prob:
+        try:
+            with time_limit(timeout):
+                return simplify(expr)
+        except TimeoutError:
+            pass
+        except Exception as e:
+            slack_message(str(e))
+            pass
+    return expr
 
 
 def solve_expr(expr, var, timeout=3):
