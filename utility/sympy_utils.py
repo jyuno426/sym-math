@@ -25,11 +25,13 @@ __all__ = [
     "_asinh",
     "_acosh",
     "_atanh",
+    "_pow",
     "test_equal",
     "test_real",
     "test_valid",
     "drop_number",
-    "subs_derivative",
+    # "subs_derivative",
+    "subs_func",
     "reduce_coefficient",
     "reduce_expr",
     "solve_expr_1",
@@ -54,7 +56,44 @@ inverse_mapping = {
 
 
 def test_equal(expr):
-    return simplify(expr) == 0
+    # with time_limit(0.5):
+    #     return simplify(expr) == 0
+    try:
+        ftn = lambdify([x, c], expr.doit(), "numpy")
+    except:
+        try:
+            if (
+                np.absolute(
+                    expr.evalf(subs={x: 0.000123453141592, c: 0.000124543211134})
+                )
+                > 1e-4
+            ):
+                print("fuck!!!")
+                return False
+            else:
+                return True
+        except:
+            try:
+                with time_limit(10):
+                    return simplify(expr.doit()) == 0
+            except:
+                print("fuck")
+                return False
+
+    numeric1 = 0.000123453141592
+    numeric2 = 0.000124543211134
+    while numeric1 < 1 and numeric2 < 1:
+        try:
+            if np.abolute(ftn([numeric1, numeric2])) > 1e-4:
+                print(np.abolute(ftn([numeric1, numeric2])))
+                return False
+        except:
+            print("fuck11")
+            return False
+        numeric1 = numeric1 * 10
+        numeric2 = numeric2 * 10
+
+    return True
 
 
 def test_valid(expr):
@@ -63,6 +102,7 @@ def test_valid(expr):
             s in str(expr) for s in ["oo", "I", "Dummy", "nan", "zoo", "conjugate"]
         )
     except:
+        # slack_message("valid error")
         # when we call str(expr), sympy calculate expr so that it can occur errors
         # such as zero division error.
         return False
@@ -91,14 +131,27 @@ def drop_number(expr, vars):
     return expr.as_independent(*vars, as_Add=True)[1]
 
 
-def subs_derivative(expr, var):
-    if "Derivative" in str(expr.func):
-        return var
+# def subs_derivative(expr, var):
+#     if "Derivative" in str(expr.func):
+#         assert "-" not in str(expr.func)
+#         return var
+#     elif len(expr.args) == 0:
+#         return expr
+#     else:
+#         return expr.func(
+#             *[subs_derivative(arg, var) for arg in expr.args], evaluate=False
+#         )
+
+
+def subs_func(expr, func, sub):
+    if expr.func == func.func:
+        assert "-" not in str(expr.func)
+        return sub
     elif len(expr.args) == 0:
         return expr
     else:
         return expr.func(
-            *[subs_derivative(arg, var) for arg in expr.args], evaluate=False
+            *[subs_func(arg, func, sub) for arg in expr.args], evaluate=False
         )
 
 

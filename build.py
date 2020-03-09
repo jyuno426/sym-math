@@ -21,13 +21,13 @@ def build(data_type, dataset_path, n=int(2e4)):
     try:
         in_file = open(in_path, "r")
         out_file = open(out_path, "r")
-        in_lines = list(in_file.readlines())
-        out_lines = list(out_file.readlines())
+        in_lines = [line.strip() for line in in_file.readlines()]
+        out_lines = [line.strip() for line in out_file.readlines()]
         i = len(in_lines)
         j = len(out_lines)
         if i == j:
             for k in range(i):
-                duplicate_check.add(in_lines[k].strip() + "-" + out_lines[k].strip())
+                duplicate_check.add(in_lines[k] + "-" + out_lines[k])
         in_file.close()
         out_file.close()
     except:
@@ -43,17 +43,23 @@ def build(data_type, dataset_path, n=int(2e4)):
 
     while i < n:
         try:
-            input_string, output_string = generate_data(data_type)
+            with time_limit(10):
+                input_string, output_string = generate_data(data_type)
+        except RecursionError:
+            slack_message("recursion error", data_type)
+            continue
         except:
             # handle unknown errors
             trace = str(traceback.format_exc())
             print(trace)
-            slack_message("unknown error occurs:\n" + trace)
+            slack_message("unknown error occurs:\n" + trace, data_type)
             continue
 
         input_string = input_string.replace("f,x", "f").replace("g,x", "g")
         output_string = output_string.replace("f,x", "f").replace("g,x", "g")
 
+        if not test_valid(input_string + "-" + output_string):
+            continue
         if len(input_string.split(",")) > 512:
             continue
         elif len(output_string.split(",")) > 512:
@@ -88,7 +94,8 @@ def build(data_type, dataset_path, n=int(2e4)):
 
 
 if __name__ == "__main__":
-    today = date.today().strftime("%Y-%m-%d")
+    # today = date.today().strftime("%Y-%m-%d")
+    today = "local"
     dataset_path = "./dataset/" + today
     data_type = "integration"
     data_cnt = int(2e4)

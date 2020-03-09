@@ -36,19 +36,9 @@ unary_operations = set(
 c1 = ["Rational", "Half"]
 c2 = ["Integer", "Symbol", "One", "NegativeOne", "Zero", "Exp1", "Pi"]
 c3 = [
-    "Abs",
-    "Add",
-    "Mul",
-    "Pow",
-    "exp",
-    "log",
-    "sqrt",
-    "sin",
-    "cos",
-    "tan",
-    "cot",
-    "sec",
-    "csc",
+    "asinh",
+    "acosh",
+    "atanh",
     "asin",
     "acos",
     "atan",
@@ -58,10 +48,19 @@ c3 = [
     "sinh",
     "cosh",
     "tanh",
-    "asinh",
-    "acosh",
-    "atanh",
-]
+    "sin",
+    "cos",
+    "tan",
+    "cot",
+    "sec",
+    "csc",
+    "Abs",
+    "exp",
+    "log",
+    "sqrt",
+]  # one args / order of c3 elements important!!!!! we should compare asinh first then sinh then sin
+c4 = ["Pow"]  # two args
+c5 = ["Add", "Mul"]  # multiple args
 
 invalid_list = ["oo", "I", "Dummy", "nan", "zoo", "conjugate"]
 
@@ -188,10 +187,19 @@ def _generate_data(data_type):
             ftn = tree.get_expr()
             if test_real(ftn, x):
                 ftn = drop_number(reduce_expr(tree.get_expr()), [x])
-                assert test_valid(ftn)
+                # ftn = reduce_expr(tree.get_expr())
+                if not test_valid(ftn):
+                    continue
+
+                try:
+                    deriv = diff(ftn, x)
+                except:
+                    slack_message("derivative error", data_type)
+                    continue
 
                 deriv = reduce_expr(diff(ftn, x))
-                assert test_valid(deriv)
+                if not test_valid(deriv):
+                    continue
 
                 return [deriv, ftn]
 
@@ -204,7 +212,8 @@ def _generate_data(data_type):
                 np.random.choice(tree.get_leaf_list()).data = c
 
                 ftn = reduce_coefficient(tree.get_expr(init=True), c, x)
-                assert test_valid(ftn)
+                if not test_valid(ftn):
+                    continue
 
                 sol = solve_expr_1(_sub(f, ftn), S(0), c)
                 if not test_valid(sol):
@@ -214,10 +223,19 @@ def _generate_data(data_type):
                 ftn = reduce_expr(ftn)
                 if not test_valid(ftn):
                     continue
+                try:
+                    diff_eq = diff(sol, x)
+                except:
+                    slack_message("derivative error", data_type)
+                    continue
 
-                diff_eq = fraction(reduce_expr(subs_derivative(diff(sol, x), g)))[0]
+                diff_eq = reduce_expr(subs_func(diff_eq, diff(f, x), g))
                 if not test_valid(diff_eq):
                     continue
+                try:
+                    diff_eq = fraction(diff_eq)[0]
+                except:
+                    pass
 
                 return [diff_eq, ftn]
         pass
@@ -230,49 +248,9 @@ def _generate_data(data_type):
 
 
 def expr_to_preorder(expr):
-    traverse = []
-    for arg in preorder_traversal(expr):
-        class_name = arg.func.__name__
-        res = None
-
-        if any(name in class_name for name in c1):
-            traverse.append(Mul.__name__)
-            left, right = str(arg).split("/")
-            traverse.append(left)
-            traverse.append(Pow.__name__)
-            traverse.append(right)
-            traverse.append("-1")
-        elif any(name in class_name for name in c2):
-            traverse.append(str(arg))
-        elif class_name == "f":
-            traverse.append("f")
-        elif class_name == "g":
-            traverse.append("g")
-        else:
-            check = False
-            for name in c3:
-                if name in class_name:
-                    traverse.append(name)
-                    check = True
-                    break
-            if not check:
-                slack_message(
-                    str(arg.func)
-                    + "\n"
-                    + str(arg)
-                    + "\n"
-                    + str(traverse)
-                    + "\n"
-                    + str(expr)
-                )
-                print(arg.func)
-                print(arg)
-                print(traverse)
-                print(expr)
-                raise Exception()
-
     res = []
-    for elem in traverse:
+
+    for elem in preorder_traverse(expr):
         string = str(elem)
         if check_number(string):
             if string[0] == "-":
@@ -289,4 +267,115 @@ def expr_to_preorder(expr):
             res.append(string)
 
     return ",".join(res)
+
+
+def preorder_traverse(expr):
+    traverse = []
+    class_name = expr.func.__name__
+
+    if any(name in class_name for name in c1):
+        traverse.append(Mul.__name__)
+        left, right = str(expr).split("/")
+        traverse.append(left)
+        traverse.append(Pow.__name__)
+        traverse.append(right)
+        traverse.append("-1")
+
+    elif any(name in class_name for name in c2):
+        traverse.append(str(expr))
+
+    elif class_name == "f":
+        traverse.append("f")
+
+    elif class_name == "g":
+        traverse.append("g")
+
+    elif any(name in class_name for name in c3):
+        assert len(expr.args) == 1
+        for name in c3:
+            if name in class_name:
+                traverse.append(name)
+                traverse += preorder_traverse(expr.args[0])
+                break
+
+    elif "Pow" in class_name:  # c4
+        assert len(expr.args) == 2
+        traverse.append("Pow")
+        traverse += preorder_traverse(expr.args[0])
+        traverse += preorder_traverse(expr.args[1])
+
+    elif any(name in class_name for name in c5):
+        assert len(expr.args) >= 2
+        for name in c5:
+            if name in class_name:
+                traverse += [name] * (len(expr.args) - 1)
+                for arg in expr.args:
+                    traverse += preorder_traverse(arg)
+                break
+    else:
+        raise Exception("preorder_traverse error")
+
+    return traverse
+
+
+# def preorder_traverse(expr):
+#     traverse = []
+#     for arg in preorder_traversal(expr):
+#         class_name = arg.func.__name__
+#         res = None
+
+#         if any(name in class_name for name in c1):
+#             traverse.append(Mul.__name__)
+#             left, right = str(arg).split("/")
+#             traverse.append(left)
+#             traverse.append(Pow.__name__)
+#             traverse.append(right)
+#             traverse.append("-1")
+#         elif any(name in class_name for name in c2):
+#             traverse.append(str(arg))
+#         elif class_name == "f":
+#             traverse.append("f")
+#         elif class_name == "g":
+#             traverse.append("g")
+#         else:
+#             check = False
+#             for name in c3:
+#                 if name in class_name:
+#                     traverse.append(name)
+#                     check = True
+#                     break
+#             if not check:
+#                 slack_message(
+#                     str(arg.func)
+#                     + "\n"
+#                     + str(arg)
+#                     + "\n"
+#                     + str(traverse)
+#                     + "\n"
+#                     + str(expr)
+#                 )
+#                 print(arg.func)
+#                 print(arg)
+#                 print(traverse)
+#                 print(expr)
+#                 raise Exception()
+
+#     res = []
+#     for elem in traverse:
+#         string = str(elem)
+#         if check_number(string):
+#             if string[0] == "-":
+#                 res.append("m")
+#                 string = string[1:]
+#             elif string[0] == "+":
+#                 res.append("p")
+#                 string = string[1:]
+#             else:
+#                 res.append("p")
+#             for c in string:
+#                 res.append(c)
+#         else:
+#             res.append(string)
+
+#     return ",".join(res)
 
