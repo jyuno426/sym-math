@@ -11,35 +11,10 @@ from reformer_pytorch import ReformerLM
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
-class Seq2Seq(torch.nn.Module):
-    def __init__(
-        self,
-        num_tokens,
-        max_seq_len,
-        emb_dim=128,
-        dim=512,
-        depth=6,
-        heads=8,
-        fixed_position_emb=True,
-    ):
-        super(Seq2Seq, self).__init__()
-
-        self.reformer = ReformerLM(
-            num_tokens=num_tokens,
-            max_seq_len=max_seq_len,
-            emb_dim=emb_dim,
-            dim=dim,
-            depth=depth,
-            heads=heads,
-            fixed_position_emb=True,
-        )
-
-    def forward(self, source):
-        return torch.nn.Softmax(self.reformer(source), dim=1)
-
-
 # constants according to the paper
+dim = 512
+depth = 6
+heads = 8
 max_seq_len = 512
 leraning_rate = 1e-4
 batch_size = 256
@@ -91,7 +66,7 @@ print("Total tokens: ", len(token_dict))
 print("Total dataset: ", data_len)
 
 dataset = [(in_data[i], out_data[i]) for i in np.random.permutation(data_len)]
-dataset = torch.tensor(dataset).long().to(device)
+dataset = torch.tensor(dataset).to(device)
 
 # divide dataset
 train_data = dataset[: int(data_len * 0.72)]
@@ -103,7 +78,17 @@ valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=True)
 
 print("Building model ....")
 
-model = Seq2Seq(num_tokens=len(token_dict), max_seq_len=max_seq_len).to(device)
+model = ReformerLM(
+    num_tokens=len(token_dict),
+    max_seq_len=max_seq_len,
+    emb_dim=emb_dim,
+    depth=depth,
+    heads=heads,
+    dim=dim,
+    fixed_position_emb=True,
+)
+model = torch.nn.DataParallel(model)
+model = model.to(0)
 optim = optimizer(model.parameters(), lr=leraning_rate)
 loss_ftn = torch.nn.CrossEntropyLoss(ignore_index=0)
 
@@ -114,6 +99,8 @@ avg_valid_losses = []
 
 early_stopping = EarlyStopping(patience=20, verbose=True)
 
+torch.cuda.empty_cache()
+
 for epoch in tqdm.tqdm(range(1, epochs + 1), mininterval=10, desc="training"):
     train_losses = []
     valid_losses = []
@@ -123,7 +110,7 @@ for epoch in tqdm.tqdm(range(1, epochs + 1), mininterval=10, desc="training"):
     for batch in train_loader:
         source = batch[:, 0, :]
         target = batch[:, 1, :]
-        output = model(source)
+        output = model(source).argmax(dim=-1)
         loss = loss_ftn(output.view(-1), target.view(-1))
         loss.backward()
         optim.step()
@@ -138,7 +125,7 @@ for epoch in tqdm.tqdm(range(1, epochs + 1), mininterval=10, desc="training"):
         for batch in valid_loader:
             source = batch[:, 0, :]
             target = batch[:, 1, :]
-            output = model(source)
+            output = model(source).argmax(dim=-1)
             loss = loss_ftn(output.view(-1), target.view(-1))
             loss_value = loss.item()
             # print(f"valid loss: {loss_value}")
@@ -164,6 +151,8 @@ for epoch in tqdm.tqdm(range(1, epochs + 1), mininterval=10, desc="training"):
     if early_stopping.early_stop:
         print("Early stopping")
         break
+
+    torch.cuda.empty_cache()
 
 # load the last checkpoint with the best model
 # model.load_state_dict(torch.load("checkpoint.pt"))
