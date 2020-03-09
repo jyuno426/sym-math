@@ -88,9 +88,9 @@ model = ReformerLM(
     fixed_position_emb=True,
 )
 model = torch.nn.DataParallel(model)
-model = model.to(0)
+model = model.to(device)
 optim = optimizer(model.parameters(), lr=leraning_rate)
-loss_ftn = torch.nn.CrossEntropyLoss(ignore_index=0)
+loss_ftn = torch.nn.CrossEntropyLoss(ignore_index=0).to(device)
 
 print("Start training!")
 
@@ -110,8 +110,8 @@ for epoch in tqdm.tqdm(range(1, epochs + 1), mininterval=10, desc="training"):
     for batch in train_loader:
         source = batch[:, 0, :]
         target = batch[:, 1, :]
-        output = model(source).argmax(dim=-1)
-        loss = loss_ftn(output.view(-1), target.view(-1))
+        output = model(source)
+        loss = loss_ftn(output, target)
         loss.backward()
         optim.step()
         optim.zero_grad()
@@ -125,8 +125,8 @@ for epoch in tqdm.tqdm(range(1, epochs + 1), mininterval=10, desc="training"):
         for batch in valid_loader:
             source = batch[:, 0, :]
             target = batch[:, 1, :]
-            output = model(source).argmax(dim=-1)
-            loss = loss_ftn(output.view(-1), target.view(-1))
+            output = model(source)
+            loss = loss_ftn(output, target)
             loss_value = loss.item()
             # print(f"valid loss: {loss_value}")
             valid_losses.append(loss_value)
