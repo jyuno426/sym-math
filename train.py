@@ -3,19 +3,13 @@
 import tqdm
 import torch
 import numpy as np
+import matplotlib.pyplot as plt
+from utility import EarlyStopping
 from torch.utils.data import DataLoader
 from reformer_pytorch import ReformerLM
 
-GRADIENT_ACCUMULATE_EVERY = 4
-VALIDATE_EVERY = 100
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# helpers
-def cycle(loader):
-    while True:
-        for data in loader:
-            yield data
 
 
 class Seq2Seq(torch.nn.Module):
@@ -101,13 +95,11 @@ dataset = torch.tensor(dataset).long().to(device)
 
 # divide dataset
 train_data = dataset[: int(data_len * 0.72)]
-validation_data = dataset[int(data_len * 0.72) : int(data_len * 0.9)]
+valid_data = dataset[int(data_len * 0.72) : int(data_len * 0.9)]
 test_data = dataset[int(data_len * 0.9) :]
 
-train_loader = cycle(DataLoader(train_data, batch_size=batch_size, shuffle=True))
-validation_loader = cycle(
-    DataLoader(validation_data, batch_size=batch_size, shuffle=True)
-)
+train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
+valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=True)
 
 print("Building model ....")
 
@@ -117,27 +109,61 @@ loss_ftn = torch.nn.CrossEntropyLoss(ignore_index=0)
 
 print("Start training!")
 
-for i in tqdm.tqdm(range(epochs), mininterval=10, desc="training"):
+avg_train_losses = []
+avg_valid_losses = []
+
+early_stopping = EarlyStopping(patience=20, verbose=True)
+
+for epoch in tqdm.tqdm(range(1, epochs + 1), mininterval=10, desc="training"):
+    train_losses = []
+    valid_losses = []
+
     model.train()
 
-    for _ in range(GRADIENT_ACCUMULATE_EVERY):
-        batch = next(train_loader)
+    for batch in train_loader:
         source = batch[:, 0, :]
         target = batch[:, 1, :]
         output = model(source)
         loss = loss_ftn(output.view(-1), target.view(-1))
         loss.backward()
+        optim.step()
+        optim.zero_grad()
+        loss_value = loss.item()
+        # print(f"training loss: {loss_value}")
+        train_losses.append(loss_value)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
 
-    print(f"training loss: {loss.item()}")
-    torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
-    optim.step()
-    optim.zero_grad()
-
-    if i % VALIDATE_EVERY == 0:
-        model.eval()
-        with torch.no_grad():
-            source, target = next(validation_loader)
+    model.eval()
+    with torch.no_grad():
+        for batch in valid_loader:
+            source = batch[:, 0, :]
+            target = batch[:, 1, :]
             output = model(source)
             loss = loss_ftn(output.view(-1), target.view(-1))
-            print(f"validation loss: {loss.item()}")
+            loss_value = loss.item()
+            # print(f"valid loss: {loss_value}")
+            valid_losses.append(loss_value)
 
+    train_loss = np.average(train_losses)
+    valid_loss = np.average(valid_losses)
+    avg_train_losses.append(train_loss)
+    avg_valid_losses.append(valid_loss)
+
+    epoch_len = len(str(epochs))
+    print_msg = (
+        f"[{epoch:>{epoch_len}}/{epochs:>{epoch_len}}] "
+        + f"train_loss: {train_loss:.5f} "
+        + f"valid_loss: {valid_loss:.5f}"
+    )
+    print(print_msg)
+
+    # early_stopping needs the validation loss to check if it has decresed,
+    # and if it has, it will make a checkpoint of the current model
+    early_stopping(valid_loss, model)
+
+    if early_stopping.early_stop:
+        print("Early stopping")
+        break
+
+# load the last checkpoint with the best model
+# model.load_state_dict(torch.load("checkpoint.pt"))
