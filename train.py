@@ -9,21 +9,27 @@ from torch.utils.data import DataLoader
 from reformer_pytorch import ReformerLM
 
 
+def cycle(loader):
+    while True:
+        for data in loader:
+            yield data
+
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
 # constants according to the paper
-dim = 64
-depth = 3
-heads = 4
+dim = 512
+depth = 6
+heads = 8
 max_seq_len = 512
 leraning_rate = 1e-4
-batch_size = 64
+batch_size = 256
 optimizer = torch.optim.Adam
 
 # constants not revealed in the paper
-emb_dim = 64
-epochs = int(1e5)
+emb_dim = 128
+batch_num = 10000
 
 
 in_data = []
@@ -70,12 +76,12 @@ dataset = [(in_data[i], out_data[i]) for i in np.random.permutation(data_len)]
 dataset = torch.tensor(dataset).to(device)
 
 # divide dataset
-train_data = dataset[: int(data_len * 0.72)]
-valid_data = dataset[int(data_len * 0.72) : int(data_len * 0.9)]
+train_data = dataset[: int(data_len * 0.8)]
+valid_data = dataset[int(data_len * 0.8) : int(data_len * 0.9)]
 test_data = dataset[int(data_len * 0.9) :]
 
-train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
-valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=True)
+train_loader = cycle(DataLoader(train_data, batch_size=batch_size, shuffle=True))
+valid_loader = cycle(DataLoader(valid_data, batch_size=batch_size, shuffle=True))
 
 print("Building model ....")
 
@@ -102,59 +108,53 @@ early_stopping = EarlyStopping(patience=20, verbose=True)
 
 torch.cuda.empty_cache()
 
-for epoch in tqdm.tqdm(range(1, epochs + 1), mininterval=1, desc="training"):
-    train_losses = []
-    valid_losses = []
+train_losses = []
+valid_losses = []
+for i in tqdm.tqdm(range(batch_num), mininterval=10, desc="training"):
 
     model.train()
 
-    for batch in train_loader:
+    for _ in range(4):
+        batch = next(train_loader)
         source = batch[:, 0, :]
-        target = batch[:, 1, :]
-        output = model(source)
-        #import pdb; pdb.set_trace()
-        loss = loss_ftn(output.contiguous().view(-1, len(token_dict)), target.contiguous().view(-1))
+        target = batch[:, 1, :].contiguous()
+        output = model(source).contiguous()
+        loss = loss_ftn(output.view(-1, len(token_dict)), target.view(-1))
         loss.backward()
-        optim.step()
-        optim.zero_grad()
-        loss_value = loss.item()
-        print(f"training loss: {loss_value}")
-        train_losses.append(loss_value)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
 
-    model.eval()
-    with torch.no_grad():
-        for batch in valid_loader:
+    loss_value = loss.item()
+    print(f"training loss: {loss_value}")
+    train_losses.append(loss_value)
+
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
+    optim.step()
+    optim.zero_grad()
+
+    if i % 4 == 0:
+        model.eval()
+        with torch.no_grad():
+            batch = next(valid_loader)
             source = batch[:, 0, :]
-            target = batch[:, 1, :]
-            output = model(source)
-            loss = loss_ftn(output.contiguous().view(-1, len(token_dict)), target.contiguous().view(-1))
+            target = batch[:, 1, :].contiguous()
+            output = model(source).contiguous()
+
+            loss = loss_ftn(output.view(-1, len(token_dict)), target.view(-1))
             loss_value = loss.item()
+
             print(f"valid loss: {loss_value}")
             valid_losses.append(loss_value)
 
-    train_loss = np.average(train_losses)
-    valid_loss = np.average(valid_losses)
-    avg_train_losses.append(train_loss)
-    avg_valid_losses.append(valid_loss)
+            # early_stopping needs the validation loss to check if it has decresed,
+            # and if it has, it will make a checkpoint of the current model
+            early_stopping(loss_value, model)
 
-    epoch_len = len(str(epochs))
-    print_msg = (
-        f"[{epoch:>{epoch_len}}/{epochs:>{epoch_len}}] "
-        + f"train_loss: {train_loss:.5f} "
-        + f"valid_loss: {valid_loss:.5f}"
-    )
-    print(print_msg)
-
-    # early_stopping needs the validation loss to check if it has decresed,
-    # and if it has, it will make a checkpoint of the current model
-    early_stopping(valid_loss, model)
-
-    if early_stopping.early_stop:
-        print("Early stopping")
-        break
+            if early_stopping.early_stop:
+                print("Early stopping")
+                break
 
     torch.cuda.empty_cache()
 
+json.dump(train_losses, open("train_losses.json", "w"))
+json.dump(valid_losses, open("valid_losses.json", "w"))
 # load the last checkpoint with the best model
 # model.load_state_dict(torch.load("checkpoint.pt"))
