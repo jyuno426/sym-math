@@ -10,18 +10,19 @@ from reformer_pytorch import ReformerLM
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
 
 # constants according to the paper
-dim = 512
-depth = 6
-heads = 8
+dim = 64
+depth = 3
+heads = 4
 max_seq_len = 512
 leraning_rate = 1e-4
-batch_size = 256
+batch_size = 64
 optimizer = torch.optim.Adam
 
 # constants not revealed in the paper
-emb_dim = 128
+emb_dim = 64
 epochs = int(1e5)
 
 
@@ -101,7 +102,7 @@ early_stopping = EarlyStopping(patience=20, verbose=True)
 
 torch.cuda.empty_cache()
 
-for epoch in tqdm.tqdm(range(1, epochs + 1), mininterval=10, desc="training"):
+for epoch in tqdm.tqdm(range(1, epochs + 1), mininterval=1, desc="training"):
     train_losses = []
     valid_losses = []
 
@@ -111,12 +112,13 @@ for epoch in tqdm.tqdm(range(1, epochs + 1), mininterval=10, desc="training"):
         source = batch[:, 0, :]
         target = batch[:, 1, :]
         output = model(source)
-        loss = loss_ftn(output, target)
+        #import pdb; pdb.set_trace()
+        loss = loss_ftn(output.contiguous().view(-1, len(token_dict)), target.contiguous().view(-1))
         loss.backward()
         optim.step()
         optim.zero_grad()
         loss_value = loss.item()
-        # print(f"training loss: {loss_value}")
+        print(f"training loss: {loss_value}")
         train_losses.append(loss_value)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
 
@@ -126,9 +128,9 @@ for epoch in tqdm.tqdm(range(1, epochs + 1), mininterval=10, desc="training"):
             source = batch[:, 0, :]
             target = batch[:, 1, :]
             output = model(source)
-            loss = loss_ftn(output, target)
+            loss = loss_ftn(output.contiguous().view(-1, len(token_dict)), target.contiguous().view(-1))
             loss_value = loss.item()
-            # print(f"valid loss: {loss_value}")
+            print(f"valid loss: {loss_value}")
             valid_losses.append(loss_value)
 
     train_loss = np.average(train_losses)
