@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import json
 import tqdm
 import torch
 import numpy as np
@@ -93,9 +94,8 @@ model = ReformerLM(
     heads=heads,
     dim=dim,
     fixed_position_emb=True,
-)
+).to(device)
 model = torch.nn.DataParallel(model)
-model = model.to(device)
 optim = optimizer(model.parameters(), lr=leraning_rate)
 loss_ftn = torch.nn.CrossEntropyLoss(ignore_index=0).to(device)
 
