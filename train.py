@@ -29,7 +29,7 @@ batch_size = 256
 optimizer = torch.optim.Adam
 
 # constants not revealed in the paper
-emb_dim = 128
+emb_dim = 512
 batch_num = 10000
 
 
@@ -94,6 +94,10 @@ model = ReformerLM(
     heads=heads,
     dim=dim,
     fixed_position_emb=True,
+    lsh_dropout = 0.1,
+    ff_dropout = 0.1,
+    post_attn_dropout = 0.1,
+    layer_dropout = 0.1,
 ).to(device)
 model = torch.nn.DataParallel(model)
 optim = optimizer(model.parameters(), lr=leraning_rate)
