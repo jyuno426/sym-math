@@ -10,6 +10,7 @@ __all__ = [
     "time_limit",
     "print_progress_bar",
     "slack_message",
+    "check_number",
 ]
 
 debug = False
@@ -82,3 +83,14 @@ def slack_message(message, channel="debug"):
         channel = "debug"
 
     slack_client.chat_postMessage(channel=channel, text=message)
+
+
+def check_number(string):
+    if string[0] in "-+":
+        compare = string[1:]
+    else:
+        compare = string
+    for c in compare:
+        if c not in "0123456789":
+            return False
+    return True
