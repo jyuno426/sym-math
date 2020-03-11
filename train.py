@@ -5,6 +5,7 @@ import tqdm
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+from sympy import *
 from utility import EarlyStopping
 from torch.utils.data import DataLoader
 from reformer_pytorch import ReformerLM
@@ -173,40 +174,42 @@ for i in tqdm.tqdm(range(batch_num), mininterval=10, desc="training"):
     loss.backward()
 
     loss_value = loss.item()
-    acc = round(accuracy(output, batch[:, 1, :]) * 100, 5)
     print(f"training loss: {loss_value}")
-    print(f"training acc: {acc}%")
     save("train_loss", loss_value)
-    save("train_acc", acc)
 
     torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
     optim.step()
     optim.zero_grad()
 
-    model.eval()
-    with torch.no_grad():
-        batch = next(valid_loader).to(device)
-        output = model(batch[:, 0, :], batch[:, 1, :])
-        loss = loss_ftn(
-            output.contiguous().view(-1, len(token_dict)),
-            batch[:, 1, :].contiguous().view(-1),
-        )
-        loss = loss.mean()
-
-        loss_value = loss.item()
+    for i % 8 == 0:
         acc = round(accuracy(output, batch[:, 1, :]) * 100, 5)
-        print(f"valid loss: {loss_value}")
-        print(f"valid acc: {acc}%")
-        save("valid_loss", loss_value)
-        save("valid_acc", acc)
+        save("train_acc", acc)
+        print(f"training acc: {acc}%")
 
-        # early_stopping needs the validation loss to check if it has decresed,
-        # and if it has, it will make a checkpoint of the current model
-        early_stopping(loss_value, model)
+        model.eval()
+        with torch.no_grad():
+            batch = next(valid_loader).to(device)
+            output = model(batch[:, 0, :], batch[:, 1, :])
+            loss = loss_ftn(
+                output.contiguous().view(-1, len(token_dict)),
+                batch[:, 1, :].contiguous().view(-1),
+            )
+            loss = loss.mean()
 
-        if early_stopping.early_stop:
-            print("Early stopping")
-            break
+            loss_value = loss.item()
+            acc = round(accuracy(output, batch[:, 1, :]) * 100, 5)
+            print(f"valid loss: {loss_value}")
+            print(f"valid acc: {acc}%")
+            save("valid_loss", loss_value)
+            save("valid_acc", acc)
+
+            # early_stopping needs the validation loss to check if it has decresed,
+            # and if it has, it will make a checkpoint of the current model
+            early_stopping(loss_value, model)
+
+            if early_stopping.early_stop:
+                print("Early stopping")
+                break
 
     torch.cuda.empty_cache()
 
