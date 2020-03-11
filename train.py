@@ -181,7 +181,7 @@ for i in tqdm.tqdm(range(batch_num), mininterval=10, desc="training"):
     optim.step()
     optim.zero_grad()
 
-    for i % 8 == 0:
+    if i % 8 == 0:
         acc = round(accuracy(output, batch[:, 1, :]) * 100, 5)
         save("train_acc", acc)
         print(f"training acc: {acc}%")

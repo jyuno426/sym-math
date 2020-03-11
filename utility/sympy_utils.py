@@ -68,7 +68,7 @@ def test_equal(expr):
                 )
                 > 1e-4
             ):
-                print("fuck!!!")
+                # print("fuck!!!")
                 return False
             else:
                 return True
@@ -77,7 +77,7 @@ def test_equal(expr):
                 with time_limit(10):
                     return simplify(expr.doit()) == 0
             except:
-                print("fuck")
+                # print("fuck")
                 return False
 
     numeric1 = 0.000123453141592
@@ -88,7 +88,7 @@ def test_equal(expr):
                 print(np.abolute(ftn([numeric1, numeric2])))
                 return False
         except:
-            print("fuck11")
+            # print("fuck11")
             return False
         numeric1 = numeric1 * 10
         numeric2 = numeric2 * 10
