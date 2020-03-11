@@ -5,7 +5,7 @@ import tqdm
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from utils import EarlyStopping
+from utility import EarlyStopping
 from torch.utils.data import DataLoader
 from reformer_pytorch import ReformerLM
 
