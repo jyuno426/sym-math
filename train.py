@@ -22,13 +22,13 @@ def cycle(loader):
 
 
 def accuracy(output, target):
-    _output = output.view(-1, output.shape[-1])
-    _target = target.view(-1)
     with torch.no_grad():
-        pred = torch.argmax(output, dim=1)
+        pred = torch.argmax(output, dim=2)
         assert pred.shape[0] == len(target)
         correct = 0
-        correct += torch.sum(pred == target).item()
+        for i in range(len(target)):
+            if torch.equal(pred[i], target[i]):
+                correct += 1
     return correct / len(target)
 
 
