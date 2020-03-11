@@ -173,9 +173,11 @@ for i in tqdm.tqdm(range(batch_num), mininterval=10, desc="training"):
     loss.backward()
 
     loss_value = loss.item()
+    acc = round(accuracy(output, batch[:, 1, :]) * 100, 5)
     print(f"training loss: {loss_value}")
+    print(f"training acc: {acc}%")
     save("train_loss", loss_value)
-    save("train_acc", round(accuracy(output, batch[:, 1, :]) * 100, 5))
+    save("train_acc", acc)
 
     torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
     optim.step()
@@ -192,9 +194,11 @@ for i in tqdm.tqdm(range(batch_num), mininterval=10, desc="training"):
         loss = loss.mean()
 
         loss_value = loss.item()
+        acc = round(accuracy(output, batch[:, 1, :]) * 100, 5)
         print(f"valid loss: {loss_value}")
+        print(f"valid acc: {acc}%")
         save("valid_loss", loss_value)
-        save("valid_acc", round(accuracy(output, batch[:, 1, :]) * 100, 5))
+        save("valid_acc", acc)
 
         # early_stopping needs the validation loss to check if it has decresed,
         # and if it has, it will make a checkpoint of the current model
