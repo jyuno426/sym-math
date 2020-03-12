@@ -56,6 +56,25 @@ emb_dim = 512
 batch_num = 5000  # 4 epochs for 160000 training sets
 
 
+def accuracy(output, target):
+    with torch.no_grad():
+        pred = torch.argmax(output, dim=2)
+        assert pred.shape[0] == len(target)
+        correct = 0
+        for i in range(len(target)):
+            j = 0
+            check = True
+            while j < len(target[i]):
+                if pred[i][j] != target[i][j]:
+                    check = False
+                    break
+                if target[i][j] == 0:
+                    break
+            if check:
+                correct += 1
+    return correct / len(target)
+
+
 class MyModel(torch.nn.Module):
     def __init__(self):
         super(MyModel, self).__init__()
@@ -167,6 +186,7 @@ if __name__ == "__main__":
     model.load_state_dict(torch.load("checkpoint.pt"))
 
     token_dict = {"pad": 0}
+    inverse_token_dict = {0: "pad"}
     token_idx = 1
 
     print("Loading ....")
@@ -182,7 +202,12 @@ if __name__ == "__main__":
                 token = _token.lower()
                 if token not in token_dict:
                     token_dict[token] = token_idx
+                    inverse_token_dict[token_idx] = token
                     token_idx += 1
+
+    for i in len(in_lines):
+        token_list = in_lines[i]
+        in_lines[i] = [token_dict[token] for token in token_list]
 
     j = len(in_lines)
 
@@ -201,9 +226,10 @@ if __name__ == "__main__":
         #     print("yeah")
         #     # print(simplify(diff(_f, x) - _diff_f))
         # print(i)
-        input_string = in_lines[i]
         # input_string, output_string = in_lines[i], out_lines[i]
 
+        source = torch.tensor([in_lines[i]])
+        output = model()
         try:
             _f = parse_string_to_expr(output_string)
             _diff_f = parse_string_to_expr(input_string)
