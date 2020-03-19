@@ -35,6 +35,7 @@ __all__ = [
     "reduce_coefficient",
     "reduce_expr",
     "solve_expr_1",
+    "get_numeric"
 ]
 
 inverse_mapping = {
@@ -54,44 +55,63 @@ inverse_mapping = {
     atanh: tanh,
 }
 
+lambdify_fail_cnt = 0
+eval_fail_cnt = 0
 
-def test_equal(expr):
+
+def get_numeric(expr, x, val):
+    ftn = lambdify(x, expr.doit(), "numpy")
+    return ftn(val)
+
+
+def test_equal(expr, x):
+    global lambdify_fail_cnt, eval_fail_cnt
     # with time_limit(0.5):
     #     return simplify(expr) == 0
     try:
-        ftn = lambdify([x, c], expr.doit(), "numpy")
-    except:
+        ftn = lambdify(x, expr.doit(), "numpy")
+    except Exception as e:
+
+        lambdify_fail_cnt += 1
+        print("lambdify_fail_cnt:", lambdify_fail_cnt)
+        print(e)
+        print(expr)
         try:
-            if (
-                np.absolute(
-                    expr.evalf(subs={x: 0.000123453141592, c: 0.000124543211134})
-                )
-                > 1e-4
-            ):
-                # print("fuck!!!")
+            if (np.absolute(
+                    expr.evalf(subs={
+                        x: 0.000123453141592,
+                        # c: 0.000124543211134
+                    })) > 1e-4):
                 return False
             else:
                 return True
-        except:
-            try:
-                with time_limit(10):
-                    return simplify(expr.doit()) == 0
-            except:
-                # print("fuck")
-                return False
-
-    numeric1 = 0.000123453141592
-    numeric2 = 0.000124543211134
-    while numeric1 < 1 and numeric2 < 1:
-        try:
-            if np.abolute(ftn([numeric1, numeric2])) > 1e-4:
-                print(np.abolute(ftn([numeric1, numeric2])))
-                return False
-        except:
-            # print("fuck11")
+        except Exception as ee:
+            eval_fail_cnt += 1
+            print("eval_fail_cnt:", eval_fail_cnt)
+            print(ee)
             return False
-        numeric1 = numeric1 * 10
-        numeric2 = numeric2 * 10
+            # try:
+            #     with time_limit(1):
+            #         return simplify(expr.doit()) == 0
+            # except:
+            #     return False
+
+    # numeric1 = 0.000123453141592
+    # numeric2 = 0.000124543211134
+    for _ in range(10):
+        i = 0
+        while True:
+            print("\r" + str(i + 1))
+            numeric1 = np.random.uniform(0.1, 1000)
+            try:
+                if np.abolute(ftn(numeric1)) > 1e-4:
+                    print(np.abolute(ftn(numeric1)))
+                    return False
+                break
+            except:
+                pass
+            i += 1
+        # numeric2 = numeric2 * 10
 
     return True
 
@@ -99,8 +119,8 @@ def test_equal(expr):
 def test_valid(expr):
     try:
         return not any(
-            s in str(expr) for s in ["oo", "I", "Dummy", "nan", "zoo", "conjugate"]
-        )
+            s in str(expr)
+            for s in ["oo", "I", "Dummy", "nan", "zoo", "conjugate"])
     except:
         # slack_message("valid error")
         # when we call str(expr), sympy calculate expr so that it can occur errors
@@ -150,9 +170,8 @@ def subs_func(expr, func, sub):
     elif len(expr.args) == 0:
         return expr
     else:
-        return expr.func(
-            *[subs_func(arg, func, sub) for arg in expr.args], evaluate=False
-        )
+        return expr.func(*[subs_func(arg, func, sub) for arg in expr.args],
+                         evaluate=False)
 
 
 def solve_expr_1(expr, res, var):
@@ -164,16 +183,17 @@ def solve_expr_1(expr, res, var):
         return res
     elif expr.func in inverse_mapping:
         assert len(expr.args) == 1
-        return solve_expr_1(
-            expr.args[0], inverse_mapping[expr.func](res, evaluate=False), var
-        )
+        return solve_expr_1(expr.args[0],
+                            inverse_mapping[expr.func](res,
+                                                       evaluate=False), var)
     elif expr.func == sqrt:
         assert len(expr.args) == 1
         return solve_expr_1(expr.args[0], _pow(res, 2), var)
     elif expr.func == Pow:
         assert len(expr.args) == 2
         assert "numbers" in str(expr.args[1].func)
-        return solve_expr_1(expr.args[0], _pow(res, _div(1, expr.args[1])), var)
+        return solve_expr_1(expr.args[0], _pow(res, _div(1, expr.args[1])),
+                            var)
     elif expr.func == Add:
         assert len(expr.args) == 2
         if var in expr.args[0].free_symbols:
@@ -188,18 +208,10 @@ def solve_expr_1(expr, res, var):
             return solve_expr_1(expr.args[1], _div(res, expr.args[0]), var)
     else:
         slack_message(
-            str(expr.func) + "\n" + str(expr) + "\n" + str(res) + "\n" + str(var)
-        )
-        raise Exception(
-            "solve expr 1 error\n"
-            + str(expr.func)
-            + "\n"
-            + str(expr)
-            + "\n"
-            + str(res)
-            + "\n"
-            + str(var)
-        )
+            str(expr.func) + "\n" + str(expr) + "\n" + str(res) + "\n" +
+            str(var))
+        raise Exception("solve expr 1 error\n" + str(expr.func) + "\n" +
+                        str(expr) + "\n" + str(res) + "\n" + str(var))
 
 
 def reduce_coefficient(expr, coeff, var):
@@ -211,8 +223,8 @@ def reduce_coefficient(expr, coeff, var):
         return expr
     else:
         return expr.func(
-            *[reduce_coefficient(arg, coeff, var) for arg in expr.args], evaluate=False
-        )
+            *[reduce_coefficient(arg, coeff, var) for arg in expr.args],
+            evaluate=False)
 
 
 def reduce_expr(expr, timeout=3, prob=0.3334):

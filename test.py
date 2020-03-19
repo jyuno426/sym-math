@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
 
-
 import json
 import tqdm
-import torch
+# import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from sympy import *
-from utility import EarlyStopping
-from torch.utils.data import DataLoader
-from reformer_pytorch import ReformerLM
+from utility import *
+# from torch.utils.data import DataLoader
+# from reformer_pytorch import ReformerLM
 from datetime import date
 from core import *
 import time
 import sys
+import traceback
 
 binary_map = {
     "Add": _add,
@@ -39,22 +39,6 @@ unary_map = {
     "sqrt": _sqrt,
 }
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(device)
-
-# constants according to the paper
-dim = 512
-depth = 6
-heads = 8
-max_seq_len = 512
-learning_rate = 2.5e-5
-batch_size = 128
-optimizer = torch.optim.Adam
-
-# constants not revealed in the paper
-emb_dim = 512
-batch_num = 5000  # 4 epochs for 160000 training sets
-
 
 def accuracy(output, target):
     with torch.no_grad():
@@ -75,48 +59,11 @@ def accuracy(output, target):
     return correct / len(target)
 
 
-class MyModel(torch.nn.Module):
-    def __init__(self):
-        super(MyModel, self).__init__()
-        self.encoder = ReformerLM(
-            num_tokens=len(token_dict),
-            max_seq_len=max_seq_len,
-            emb_dim=emb_dim,
-            depth=depth,
-            heads=heads,
-            dim=dim,
-            fixed_position_emb=True,
-            return_embeddings=True,
-            lsh_dropout=0.1,
-            ff_dropout=0.1,
-            post_attn_dropout=0.1,
-            layer_dropout=0.1,
-        ).to(device)
-
-        self.decoder = ReformerLM(
-            num_tokens=len(token_dict),
-            max_seq_len=max_seq_len,
-            emb_dim=emb_dim,
-            depth=depth,
-            heads=heads,
-            dim=dim,
-            fixed_position_emb=True,
-            causal=True,
-            lsh_dropout=0.1,
-            ff_dropout=0.1,
-            post_attn_dropout=0.1,
-            layer_dropout=0.1,
-        ).to(device)
-
-    def forward(self, source, target):
-        return self.decoder(target, keys=self.encoder(source))
-
-
 def parse_string_to_expr(string):
     root = Node()
     empty_node_stack = [root]
 
-    arg_list = string.split(",")
+    arg_list = string.split(" ")
 
     i = 0
     n = len(arg_list)
@@ -170,77 +117,289 @@ def parse_string_to_expr(string):
             empty_node_stack.append(left)
             i += 1
         else:
-            print(string)
-            print(arg)
+            assert 1 == 0
+            # print(string)
+            # print(arg)
             raise Exception("parse error: " + arg)
 
-    return root.get_expr().doit()
+    # print(string)
+    # for node in empty_node_stack:
+    #     print(node.data)
+    assert len(empty_node_stack) == 0
+
+    try:
+        res = root.get_expr().doit()
+    except:
+        print("holy")
+
+    return res
+
+
+def mywrite(string, end=None):
+    with open("dataset/log-test.txt", "a+") as f:
+        if end is None:
+            f.write(string + "\n")
+        else:
+            f.write(string + end)
+
+
+def mywrite_mapping(string, end=None):
+    with open("dataset/log-test-mapping.txt", "a+") as f:
+        if end is None:
+            f.write(string + "\n")
+        else:
+            f.write(string + end)
 
 
 if __name__ == "__main__":
-    model = MyModel().to(device)
-    model = torch.nn.DataParallel(model)
-    optim = optimizer(model.parameters(), lr=learning_rate)
-    loss_ftn = torch.nn.CrossEntropyLoss(ignore_index=0, reduction="sum").to(device)
+    _file = "test"
+    src = []
+    tgt = []
+    pred = []
+    pred_mapping = []
+    beam_size = 10
+    with open("dataset/local/src-" + _file + ".txt", "r") as f:
+        for line in f.readlines():
+            _line = line.strip()
+            src.append(_line)
+    with open("dataset/local/tgt-" + _file + ".txt", "r") as f:
+        for line in f.readlines():
+            _line = line.strip()
+            tgt.append(_line)
+    with open("dataset/local/pred-" + _file + ".txt", "r") as f:
+        for line in f.readlines():
+            _line = line.strip()
+            if len(pred) == 0 or len(pred[-1]) == beam_size:
+                pred.append([])
+            pred[-1].append(_line)
+    # with open("dataset/local/pred-" + _file + "-mapping.txt", "r") as f:
+    #     for line in f.readlines():
+    #         _line = line.strip()
+    #         if len(pred_mapping) == 0 or len(pred_mapping[-1]) == beam_size:
+    #             pred_mapping.append([])
+    #         pred_mapping[-1].append(_line)
 
-    model.load_state_dict(torch.load("checkpoint.pt"))
+    assert len(src) == len(tgt) and len(src) == len(
+        pred)  # and len(src) == len(pred_mapping)
 
-    token_dict = {"pad": 0}
-    inverse_token_dict = {0: "pad"}
-    token_idx = 1
+    n = len(src)
+    mywrite("total: " + str(n))
+    # mywrite_mapping("total: " + str(n))
+    data_error_cnt = 0
 
-    print("Loading ....")
+    exact_cnt = 0
+    success_cnt = 0
+    incorrect_cnt = 0
+    parse_error_cnt = 0
+    evaluation_error_cnt = 0
 
-    # preprocess input data
-    in_lines = []
-    with open("./dataset/local/integration.in", "r") as f:
-        for i, line in enumerate(f.readlines()):
-            token_list = line.strip().split(",")
-            if i >= 200000:
-                in_lines.append(token_list)
-            for i, _token in enumerate(token_list):
-                token = _token.lower()
-                if token not in token_dict:
-                    token_dict[token] = token_idx
-                    inverse_token_dict[token_idx] = token
-                    token_idx += 1
+    # exact_cnt_mapping = 0
+    # success_cnt_mapping = 0
+    # incorrect_cnt_mapping = 0
+    # parse_error_cnt_mapping = 0
+    # evaluation_error_cnt_mapping = 0
 
-    for i in len(in_lines):
-        token_list = in_lines[i]
-        in_lines[i] = [token_dict[token] for token in token_list]
+    incorrects = []
+    incorrects_mapping = []
+    test_cnt = 30
 
-    j = len(in_lines)
+    for i in range(n):
+        assert len(pred[i]) == beam_size
+        # assert len(pred_mapping[i]) == beam_size
 
-    print("total:", j)
-    cnt = 0
-    for i in range(j):
-        # print(i)
-        # input_string, output_string = generate_data("ode1")
-        # # input_string, output_string = in_lines[i], out_lines[i]
-        # _f = parse_string_to_expr(output_string)
-        # _diff_f = diff(_f, x)
-        # _diff_eq = parse_string_to_expr(input_string)
-
-        # if test_equal(subs_func(subs_func(_diff_eq, f, _f), diff(f, x), _diff_f)):
-        #     cnt += 1
-        #     print("yeah")
-        #     # print(simplify(diff(_f, x) - _diff_f))
-        # print(i)
-        # input_string, output_string = in_lines[i], out_lines[i]
-
-        source = torch.tensor([in_lines[i]])
-        output = model()
         try:
-            _f = parse_string_to_expr(output_string)
-            _diff_f = parse_string_to_expr(input_string)
-            if test_equal(diff(_f, x) - _diff_f):
-                cnt += 1
-                print("yeah")
-            else:
-                print(diff(_f, x))
-                print(_diff_f)
-                # print(simplify(diff(_f, x) - _diff_f))
-        except:
-            pass
+            _diff_f = parse_string_to_expr(src[i])
+        except Exception as e:
+            # mywrite("src_error:", e)
+            data_error_cnt += 1
+            mywrite(
+                str(data_error_cnt) + "-" + str(exact_cnt) + "-" +
+                str(success_cnt) + "-" + str(incorrect_cnt) + "-" +
+                str(parse_error_cnt) + "-" + str(evaluation_error_cnt) + "/" +
+                str(i + 1))
+            # mywrite_mapping(
+            #     str(data_error_cnt) + "-" + str(exact_cnt_mapping) + "-" +
+            #     str(success_cnt_mapping) + "-" + str(incorrect_cnt_mapping) +
+            #     "-" + str(parse_error_cnt_mapping) + "-" +
+            #     str(evaluation_error_cnt_mapping) + "/" + str(i + 1))
+            continue
 
-    print(str(round(cnt / j * 100)) + "%")
+        data_domain_error_cnt = 0
+        numerics = []
+        tgt_vals = []
+        while data_domain_error_cnt < 200 and len(numerics) < test_cnt:
+            numeric = np.random.uniform(-100, 100)
+            try:
+                tgt_val = get_numeric(_diff_f, x, numeric)
+                tgt_vals.append(tgt_val)
+                numerics.append(numeric)
+                data_domain_error_cnt = 0
+            except:
+                data_domain_error_cnt += 1
+
+        if len(numerics) != test_cnt:
+            data_error_cnt += 1
+            mywrite(
+                str(data_error_cnt) + "-" + str(exact_cnt) + "-" +
+                str(success_cnt) + "-" + str(incorrect_cnt) + "-" +
+                str(parse_error_cnt) + "-" + str(evaluation_error_cnt) + "/" +
+                str(i + 1))
+            # mywrite_mapping(
+            #     str(data_error_cnt) + "-" + str(exact_cnt_mapping) + "-" +
+            #     str(success_cnt_mapping) + "-" + str(incorrect_cnt_mapping) +
+            #     "-" + str(parse_error_cnt_mapping) + "-" +
+            #     str(evaluation_error_cnt_mapping) + "/" + str(i + 1))
+            continue
+
+        # ----------------------------------------------------------------
+
+        cur_errors = []
+        exact = False
+        success = False
+        parse_success = False
+        evaluation_success = False
+        for j in range(beam_size):
+            if pred[i][j] == tgt[i]:
+                exact = True
+                break
+
+            try:
+                _f = parse_string_to_expr(pred[i][j])
+            except:
+                # parse error
+                continue
+            parse_success = True
+
+            try:
+                __diff__f = diff(_f, x)
+            except:
+                # evaluation error
+                continue
+
+            errors = []
+            for ii in range(test_cnt):
+                try:
+                    pred_val = get_numeric(__diff__f, x, numerics[ii])
+                except:
+                    # evaluation error
+                    break
+
+                dd = np.absolute(tgt_vals[ii] - pred_val)
+                errors.append(dd)
+                # ss = np.absolute(tgt_vals[ii]) + np.absolute(pred_val)
+                # if ss < 1e-10:  # if sum is 0
+                #     errors.append(dd)
+                # else:
+                #     errors.append(dd / ss)
+
+            if len(errors) == test_cnt:
+                evaluation_success = True
+
+                check = True
+                for error in errors:
+                    if error >= 1e-4:
+                        check = False
+                        break
+                if check:
+                    success = True
+                    break
+                else:
+                    cur_errors.append(errors)
+
+        if exact:
+            exact_cnt += 1
+        elif success:
+            success_cnt += 1
+        elif not parse_success:
+            parse_error_cnt += 1
+        elif not evaluation_success:
+            evaluation_error_cnt += 1
+        else:
+            incorrect_cnt += 1
+            incorrects.append(cur_errors)
+
+        mywrite(
+            str(data_error_cnt) + "-" + str(exact_cnt) + "-" +
+            str(success_cnt) + "-" + str(incorrect_cnt) + "-" +
+            str(parse_error_cnt) + "-" + str(evaluation_error_cnt) + "/" +
+            str(i + 1))
+
+        # ----------------------------------------------------------------
+
+        # cur_errors = []
+        # exact = False
+        # success = False
+        # parse_success = False
+        # evaluation_success = False
+        # for j in range(beam_size):
+        #     if pred_mapping[i][j] == tgt[i]:
+        #         exact = True
+        #         break
+
+        #     try:
+        #         _f = parse_string_to_expr(pred_mapping[i][j])
+        #     except:
+        #         # parse error
+        #         # print("holy")
+        #         # print(pred_mapping[i][j])
+        #         continue
+        #     parse_success = True
+
+        #     try:
+        #         __diff__f = diff(_f, x)
+        #     except:
+        #         # evaluation error
+        #         continue
+
+        #     errors = []
+        #     for ii in range(test_cnt):
+        #         try:
+        #             pred_val = get_numeric(_diff_f, x, numerics[ii])
+        #         except:
+        #             # evaluation error
+        #             break
+
+        #         dd = np.absolute(tgt_vals[ii] - pred_val)
+        #         errors.append(dd)
+        #         # ss = np.absolute(tgt_vals[ii]) + np.absolute(pred_val)
+        #         # if ss < 1e-10:  # if sum is 0
+        #         #     errors.append(dd)
+        #         # else:
+        #         #     errors.append(dd / ss)
+
+        #     if len(errors) == test_cnt:
+        #         evaluation_success = True
+
+        #         check = True
+        #         for error in errors:
+        #             if error >= 1e-4:
+        #                 check = False
+        #                 break
+        #         if check:
+        #             success = True
+        #             break
+        #         else:
+        #             cur_errors.append(errors)
+
+        # if exact:
+        #     exact_cnt_mapping += 1
+        # elif success:
+        #     success_cnt_mapping += 1
+        # elif not parse_success:
+        #     parse_error_cnt_mapping += 1
+        # elif not evaluation_success:
+        #     evaluation_error_cnt_mapping += 1
+        # else:
+        #     incorrect_cnt_mapping += 1
+        #     incorrects_mapping.append(cur_errors)
+
+        # mywrite_mapping(
+        #     str(data_error_cnt) + "-" + str(exact_cnt_mapping) + "-" +
+        #     str(success_cnt_mapping) + "-" + str(incorrect_cnt_mapping) + "-" +
+        #     str(parse_error_cnt_mapping) + "-" +
+        #     str(evaluation_error_cnt_mapping) + "/" + str(i + 1))
+
+    for errors in incorrects:
+        mywrite(str(np.average(errors)))
+    # for errors in incorrects_mapping:
+    #     mywrite_mapping(str(np.average(errors)))
